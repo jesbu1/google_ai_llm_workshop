@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
 import {
@@ -35,14 +35,17 @@ const App = () => {
   const [prompt, setPrompt] = useState('');
   const [generatedText, setGeneratedText] = useState('');
   const [maxLength, setMaxLength] = useState(100);
-  const [temperature, setTemperature] = useState(0.8);
+  const [temperature, setTemperature] = useState(0);
   
   // Training state
   const [trainingText, setTrainingText] = useState('');
   const [epochs, setEpochs] = useState(50);
-  const [batchSize, setBatchSize] = useState(32);
   const [isTraining, setIsTraining] = useState(false);
   const [lossHistory, setLossHistory] = useState([]);
+  const [accuracyHistory, setAccuracyHistory] = useState([]);
+  
+  // Fixed batch size
+  const BATCH_SIZE = 32;
   
   // Loading states
   const [isGenerating, setIsGenerating] = useState(false);
@@ -111,8 +114,8 @@ const App = () => {
     try {
       setMessage('Creating new user...');
       
-      // Send a training request with "new" as the user ID to create one
-      // Use a longer sample text to avoid training issues
+      // Send a training request with a temporary UUID
+      const tempUserId = 'temp-' + Date.now();
       const sampleText = `This is a sample text to initialize the model. 
       The quick brown fox jumps over the lazy dog. 
       She sells seashells by the seashore. 
@@ -121,10 +124,10 @@ const App = () => {
       A journey of a thousand miles begins with a single step.`;
       
       const response = await axios.post(`${API_URL}/train`, {
-        user_id: 'new',
+        user_id: tempUserId,
         training_text: sampleText,
         epochs: 1,
-        batch_size: 8,
+        batch_size: BATCH_SIZE,
         create_new: true
       });
       
@@ -168,7 +171,7 @@ const App = () => {
     }
   };
   
-  // Train model
+  // Train model with SSE
   const handleTraining = async (e) => {
     e.preventDefault();
     
@@ -191,20 +194,90 @@ const App = () => {
     try {
       setIsTraining(true);
       setMessage('Training model...');
+      setAccuracyHistory([]);
       
-      const response = await axios.post(`${API_URL}/train`, {
+      // Prepare data for the POST request
+      const trainingData = {
         user_id: userId,
         training_text: trainingText,
-        epochs,
-        batch_size: batchSize,
+        epochs: epochs,
+        batch_size: BATCH_SIZE,
         create_new: false
+      };
+      
+      // First, send a POST request to initiate training
+      await fetch(`${API_URL}/train_sse`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(trainingData)
+      }).then(response => {
+        // Create an event reader from the response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        // Process the stream
+        function processStream() {
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              console.log('Stream complete');
+              setIsTraining(false);
+              return;
+            }
+            
+            // Decode the chunk
+            const chunk = decoder.decode(value);
+            
+            // Process each SSE event in the chunk
+            const events = chunk.split('\n\n');
+            for (const event of events) {
+              if (event.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(event.substring(6));
+                  
+                  switch (data.status) {
+                    case 'starting':
+                      setMessage(`Starting training with ${data.total_epochs} epochs...`);
+                      break;
+                    
+                    case 'progress':
+                      setMessage(`Training: ${data.epoch}/${data.total_epochs} epochs, Accuracy: ${data.accuracy.toFixed(4)}`);
+                      setAccuracyHistory(data.accuracy_history);
+                      break;
+                    
+                    case 'complete':
+                      setMessage('Model trained successfully!');
+                      setAccuracyHistory(data.accuracy_history || []);
+                      setIsTraining(false);
+                      setTimeout(() => setMessage(''), 3000);
+                      break;
+                    
+                    case 'error':
+                      setMessage(`Error: ${data.message}`);
+                      setIsTraining(false);
+                      break;
+                    
+                    default:
+                      console.log('Unknown status:', data);
+                  }
+                } catch (e) {
+                  console.error('Error parsing event data:', e, event);
+                }
+              }
+            }
+            
+            // Continue reading the stream
+            processStream();
+          }).catch(err => {
+            console.error('Error reading stream:', err);
+            setMessage('Error in training connection');
+            setIsTraining(false);
+          });
+        }
+        
+        processStream();
       });
-      
-      setLossHistory(response.data.loss_history);
-      setIsTraining(false);
-      setMessage('Model trained successfully!');
-      
-      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error training model:', error);
       setMessage('Error training model: ' + (error.response?.data?.detail || error.message));
@@ -240,7 +313,7 @@ const App = () => {
     }
   };
 
-  // Train with fetched corpus
+  // Train with fetched corpus with SSE
   const handleTrainWithCorpus = async () => {
     if (!userId) {
       setMessage('Please create a user or enter a user ID first');
@@ -255,19 +328,90 @@ const App = () => {
     try {
       setIsTraining(true);
       setMessage('Training model with corpus...');
-
-      const response = await axios.post(`${API_URL}/train_with_corpus`, {
+      setAccuracyHistory([]);
+      
+      // Prepare data for the POST request
+      const trainingData = {
         user_id: userId,
         training_text: fetchedTexts.join('\n\n'),
-        epochs,
-        batch_size: batchSize,
+        epochs: epochs,
+        batch_size: BATCH_SIZE,
         create_new: false
+      };
+      
+      // First, send a POST request to initiate training
+      await fetch(`${API_URL}/train_with_corpus_sse`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(trainingData)
+      }).then(response => {
+        // Create an event reader from the response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        // Process the stream
+        function processStream() {
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              console.log('Stream complete');
+              setIsTraining(false);
+              return;
+            }
+            
+            // Decode the chunk
+            const chunk = decoder.decode(value);
+            
+            // Process each SSE event in the chunk
+            const events = chunk.split('\n\n');
+            for (const event of events) {
+              if (event.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(event.substring(6));
+                  
+                  switch (data.status) {
+                    case 'starting':
+                      setMessage(`Starting training with ${data.total_epochs} epochs...`);
+                      break;
+                    
+                    case 'progress':
+                      setMessage(`Training: ${data.epoch}/${data.total_epochs} epochs, Accuracy: ${data.accuracy.toFixed(4)}`);
+                      setAccuracyHistory(data.accuracy_history);
+                      break;
+                    
+                    case 'complete':
+                      setMessage('Model trained successfully!');
+                      setAccuracyHistory(data.accuracy_history || []);
+                      setIsTraining(false);
+                      setTimeout(() => setMessage(''), 3000);
+                      break;
+                    
+                    case 'error':
+                      setMessage(`Error: ${data.message}`);
+                      setIsTraining(false);
+                      break;
+                    
+                    default:
+                      console.log('Unknown status:', data);
+                  }
+                } catch (e) {
+                  console.error('Error parsing event data:', e, event);
+                }
+              }
+            }
+            
+            // Continue reading the stream
+            processStream();
+          }).catch(err => {
+            console.error('Error reading stream:', err);
+            setMessage('Error in training connection');
+            setIsTraining(false);
+          });
+        }
+        
+        processStream();
       });
-
-      setLossHistory(response.data.loss_history);
-      setIsTraining(false);
-      setMessage('Model trained successfully!');
-      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error training model:', error);
       setMessage('Error training model: ' + (error.response?.data?.detail || error.message));
@@ -277,11 +421,11 @@ const App = () => {
   
   // Chart data and options
   const chartData = {
-    labels: lossHistory.map((_, index) => `Epoch ${index + 1}`),
+    labels: accuracyHistory.map((_, index) => `Epoch ${index + 1}`),
     datasets: [
       {
-        label: 'Training Loss',
-        data: lossHistory,
+        label: 'Token Prediction Accuracy',
+        data: accuracyHistory,
         borderColor: 'rgb(75, 192, 192)',
         tension: 0.1
       }
@@ -296,7 +440,17 @@ const App = () => {
       },
       title: {
         display: true,
-        text: 'Training Loss'
+        text: 'Token Prediction Accuracy'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 1,
+        title: {
+          display: true,
+          text: 'Accuracy (0-1)'
+        }
       }
     }
   };
@@ -438,8 +592,34 @@ const App = () => {
                   <div className="list-group">
                     {fetchedTexts.map((text, index) => (
                       <div key={index} className="list-group-item">
-                        <small className="text-muted">Text {index + 1} ({text.length} characters)</small>
-                        <p className="mb-0">{text.substring(0, 100)}...</p>
+                        <div className="d-flex justify-content-between align-items-center mb-2">
+                          <small className="text-muted">Text {index + 1} ({text.length} characters)</small>
+                          <button 
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => {
+                              setTrainingText(text);
+                              setMessage("Text copied to training area");
+                              setTimeout(() => setMessage(""), 2000);
+                            }}
+                          >
+                            Use as Training Text
+                          </button>
+                        </div>
+                        <div 
+                          style={{ 
+                            maxHeight: '250px', 
+                            overflowY: 'auto', 
+                            padding: '10px',
+                            backgroundColor: '#f8f9fa',
+                            borderRadius: '4px',
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          <p style={{ whiteSpace: 'pre-wrap' }}>
+                            {text.substring(0, 2000)}
+                            {text.length > 2000 && '...'}
+                          </p>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -476,9 +656,9 @@ const App = () => {
                       id="maxLength"
                       className="form-control" 
                       min="10" 
-                      max="500"
+                      max="200"
                       value={maxLength}
-                      onChange={(e) => setMaxLength(parseInt(e.target.value))}
+                      onChange={(e) => setMaxLength(Math.min(parseInt(e.target.value), 200))}
                     />
                   </div>
                   <div className="col-md-6">
@@ -487,7 +667,7 @@ const App = () => {
                       type="range" 
                       id="temperature"
                       className="form-range" 
-                      min="0.1" 
+                      min="0" 
                       max="2" 
                       step="0.1"
                       value={temperature}
@@ -538,28 +718,16 @@ const App = () => {
                 </div>
                 
                 <div className="row mb-3">
-                  <div className="col-md-6">
+                  <div className="col-md-12">
                     <label htmlFor="epochs" className="form-label">Epochs</label>
                     <input 
                       type="number" 
                       id="epochs"
                       className="form-control" 
                       min="1" 
-                      max="20"
+                      max="50"
                       value={epochs}
                       onChange={(e) => setEpochs(parseInt(e.target.value))}
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label htmlFor="batchSize" className="form-label">Batch Size</label>
-                    <input 
-                      type="number" 
-                      id="batchSize"
-                      className="form-control" 
-                      min="1" 
-                      max="64"
-                      value={batchSize}
-                      onChange={(e) => setBatchSize(parseInt(e.target.value))}
                     />
                   </div>
                 </div>
@@ -573,7 +741,7 @@ const App = () => {
                 </button>
               </form>
               
-              {lossHistory.length > 0 && (
+              {accuracyHistory.length > 0 && (
                 <div className="mt-4">
                   <h5>Training Results:</h5>
                   <div style={{ height: '200px' }}>
