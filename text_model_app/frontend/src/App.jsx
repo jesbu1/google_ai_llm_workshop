@@ -24,7 +24,7 @@ ChartJS.register(
 );
 
 // API base URL
-const API_URL = 'http://localhost:8000';
+const API_URL = "http://localhost:8000";
 
 const App = () => {
   // User state
@@ -39,7 +39,7 @@ const App = () => {
   
   // Training state
   const [trainingText, setTrainingText] = useState('');
-  const [epochs, setEpochs] = useState(5);
+  const [epochs, setEpochs] = useState(50);
   const [batchSize, setBatchSize] = useState(32);
   const [isTraining, setIsTraining] = useState(false);
   const [lossHistory, setLossHistory] = useState([]);
@@ -47,6 +47,41 @@ const App = () => {
   // Loading states
   const [isGenerating, setIsGenerating] = useState(false);
   const [message, setMessage] = useState('');
+  
+  // Corpus selection state
+  const [corpusType, setCorpusType] = useState('wikipedia');
+  const [corpusCategory, setCorpusCategory] = useState('nature');
+  const [corpusCount, setCorpusCount] = useState(5);
+  const [isFetchingCorpus, setIsFetchingCorpus] = useState(false);
+  const [fetchedTexts, setFetchedTexts] = useState([]);
+  
+  // Corpus options
+  const corpusOptions = {
+    wikipedia: [
+      'nature',
+      'technology',
+      'history',
+      'science',
+      'art',
+      'philosophy',
+      'mathematics',
+      'literature',
+      'geography',
+      'sports'
+    ],
+    books: [
+      'fiction',
+      'non-fiction',
+      'classic',
+      'poetry',
+      'drama',
+      'mystery',
+      'romance',
+      'adventure',
+      'biography',
+      'science-fiction'
+    ]
+  };
   
   // Check if a user model exists
   useEffect(() => {
@@ -177,6 +212,69 @@ const App = () => {
     }
   };
   
+  // Fetch corpus
+  const handleFetchCorpus = async () => {
+    if (!userId) {
+      setMessage('Please create a user or enter a user ID first');
+      return;
+    }
+
+    try {
+      setIsFetchingCorpus(true);
+      setMessage('Fetching corpus...');
+
+      const response = await axios.post(`${API_URL}/fetch_corpus`, {
+        corpus_type: corpusType,
+        category: corpusCategory,
+        count: corpusCount
+      });
+
+      setFetchedTexts(response.data.texts);
+      setMessage(`Successfully fetched ${response.data.texts.length} texts (${response.data.total_length} characters)`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error fetching corpus:', error);
+      setMessage('Error fetching corpus: ' + (error.response?.data?.detail || error.message));
+    } finally {
+      setIsFetchingCorpus(false);
+    }
+  };
+
+  // Train with fetched corpus
+  const handleTrainWithCorpus = async () => {
+    if (!userId) {
+      setMessage('Please create a user or enter a user ID first');
+      return;
+    }
+
+    if (fetchedTexts.length === 0) {
+      setMessage('Please fetch a corpus first');
+      return;
+    }
+
+    try {
+      setIsTraining(true);
+      setMessage('Training model with corpus...');
+
+      const response = await axios.post(`${API_URL}/train_with_corpus`, {
+        user_id: userId,
+        training_text: fetchedTexts.join('\n\n'),
+        epochs,
+        batch_size: batchSize,
+        create_new: false
+      });
+
+      setLossHistory(response.data.loss_history);
+      setIsTraining(false);
+      setMessage('Model trained successfully!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error training model:', error);
+      setMessage('Error training model: ' + (error.response?.data?.detail || error.message));
+      setIsTraining(false);
+    }
+  };
+  
   // Chart data and options
   const chartData = {
     labels: lossHistory.map((_, index) => `Epoch ${index + 1}`),
@@ -263,6 +361,94 @@ const App = () => {
       )}
       
       <div className="row">
+        {/* Corpus Selection Section */}
+        <div className="col-md-12 mb-4">
+          <div className="card">
+            <div className="card-body">
+              <h3 className="card-title">Corpus Selection</h3>
+              
+              <div className="row mb-3">
+                <div className="col-md-4">
+                  <label htmlFor="corpusType" className="form-label">Corpus Type</label>
+                  <select 
+                    id="corpusType"
+                    className="form-select"
+                    value={corpusType}
+                    onChange={(e) => {
+                      setCorpusType(e.target.value);
+                      setCorpusCategory(corpusOptions[e.target.value][0]);
+                    }}
+                  >
+                    <option value="wikipedia">Wikipedia</option>
+                    <option value="books">Books</option>
+                  </select>
+                </div>
+                
+                <div className="col-md-4">
+                  <label htmlFor="corpusCategory" className="form-label">Category</label>
+                  <select 
+                    id="corpusCategory"
+                    className="form-select"
+                    value={corpusCategory}
+                    onChange={(e) => setCorpusCategory(e.target.value)}
+                  >
+                    {corpusOptions[corpusType].map(category => (
+                      <option key={category} value={category}>
+                        {category.charAt(0).toUpperCase() + category.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="col-md-4">
+                  <label htmlFor="corpusCount" className="form-label">Number of Texts</label>
+                  <input 
+                    type="number"
+                    id="corpusCount"
+                    className="form-control"
+                    min="1"
+                    max="20"
+                    value={corpusCount}
+                    onChange={(e) => setCorpusCount(parseInt(e.target.value))}
+                  />
+                </div>
+              </div>
+              
+              <button 
+                className="btn btn-primary me-2"
+                onClick={handleFetchCorpus}
+                disabled={isFetchingCorpus || !userId}
+              >
+                {isFetchingCorpus ? 'Fetching...' : 'Fetch Corpus'}
+              </button>
+              
+              {fetchedTexts.length > 0 && (
+                <button 
+                  className="btn btn-success"
+                  onClick={handleTrainWithCorpus}
+                  disabled={isTraining}
+                >
+                  {isTraining ? 'Training...' : 'Train with Corpus'}
+                </button>
+              )}
+              
+              {fetchedTexts.length > 0 && (
+                <div className="mt-3">
+                  <h5>Fetched Texts:</h5>
+                  <div className="list-group">
+                    {fetchedTexts.map((text, index) => (
+                      <div key={index} className="list-group-item">
+                        <small className="text-muted">Text {index + 1} ({text.length} characters)</small>
+                        <p className="mb-0">{text.substring(0, 100)}...</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        
         {/* Text Generation Section */}
         <div className="col-md-6">
           <div className="card h-100">
