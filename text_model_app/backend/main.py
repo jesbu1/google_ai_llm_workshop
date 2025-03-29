@@ -85,26 +85,35 @@ if not os.path.exists(PRETRAINED_MODEL_PATH) or not os.path.exists(
         tokenizer.fit([corpus])
         print(f"Tokenizer vocabulary size: {tokenizer.vocab_size}")
 
-        # Create model
-        model = SimpleLanguageModel(tokenizer.vocab_size)
-        print("Model created")
+        # Create model with improved parameters
+        model = SimpleLanguageModel(
+            vocab_size=tokenizer.vocab_size,
+            embedding_dim=256,  # Increased from 128
+            hidden_size=512,  # Increased from 256
+            num_layers=3,  # Increased from 2
+            dropout=0.3,  # Increased from 0.2
+        )
+        print("Enhanced model created with larger parameters")
 
-        # Create trainer with shorter sequence length for demo
+        # Create trainer with improved parameters
         trainer = LanguageModelTrainer(
             tokenizer,
             model,
-            sequence_length=50,  # Shorter sequence length for the sample corpus
+            sequence_length=75,  # Increased from 50
+            learning_rate=0.0005,  # Lower learning rate for better convergence
             device=device,
         )
 
-        # Train on corpus
-        print("Training pre-trained model...")
-        trainer.train_on_text(corpus, epochs=10, batch_size=8)
+        # Train on corpus with more epochs
+        print("Training enhanced pre-trained model...")
+        trainer.train_on_text(
+            corpus, epochs=20, batch_size=16
+        )  # Increased epochs from 10, larger batch size
 
         # Save pre-trained model
-        print(f"Saving pre-trained model to {PRETRAINED_MODEL_PATH}")
+        print(f"Saving enhanced pre-trained model to {PRETRAINED_MODEL_PATH}")
         trainer.save_model(PRETRAINED_MODEL_PATH, PRETRAINED_TOKENIZER_PATH)
-        print("Pre-trained model created and saved!")
+        print("Enhanced pre-trained model created and saved!")
     except Exception as e:
         print(f"Error creating pre-trained model: {str(e)}")
         import traceback
@@ -112,7 +121,10 @@ if not os.path.exists(PRETRAINED_MODEL_PATH) or not os.path.exists(
         print(traceback.format_exc())
         raise
 else:
-    print(f"Pre-trained model already exists at {PRETRAINED_MODEL_PATH}")
+    print(f"Pre-trained model exists at {PRETRAINED_MODEL_PATH}")
+    print(
+        "To build an improved model, delete the files in the models/pretrained directory and restart the server"
+    )
 
 
 def get_user_model_path(user_id: str) -> tuple:
