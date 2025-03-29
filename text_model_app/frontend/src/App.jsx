@@ -77,9 +77,17 @@ const App = () => {
       setMessage('Creating new user...');
       
       // Send a training request with "new" as the user ID to create one
+      // Use a longer sample text to avoid training issues
+      const sampleText = `This is a sample text to initialize the model. 
+      The quick brown fox jumps over the lazy dog. 
+      She sells seashells by the seashore. 
+      To be or not to be, that is the question.
+      All that glitters is not gold.
+      A journey of a thousand miles begins with a single step.`;
+      
       const response = await axios.post(`${API_URL}/train`, {
         user_id: 'new',
-        training_text: 'Hello world',  // Just a placeholder
+        training_text: sampleText,
         epochs: 1,
         batch_size: 8,
         create_new: true
@@ -93,7 +101,7 @@ const App = () => {
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error creating user:', error);
-      setMessage('Error creating user');
+      setMessage('Error creating user: ' + (error.response?.data?.detail || error.message));
     }
   };
   
@@ -139,6 +147,12 @@ const App = () => {
       return;
     }
     
+    // Validate minimum text length
+    if (trainingText.length < 50) {
+      setMessage('Please enter more text for training (at least 50 characters)');
+      return;
+    }
+    
     try {
       setIsTraining(true);
       setMessage('Training model...');
@@ -158,7 +172,7 @@ const App = () => {
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error training model:', error);
-      setMessage('Error training model');
+      setMessage('Error training model: ' + (error.response?.data?.detail || error.message));
       setIsTraining(false);
     }
   };

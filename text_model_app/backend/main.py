@@ -73,27 +73,46 @@ PRETRAINED_TOKENIZER_PATH = "models/pretrained/tokenizer.json"
 if not os.path.exists(PRETRAINED_MODEL_PATH) or not os.path.exists(
     PRETRAINED_TOKENIZER_PATH
 ):
-    print("Creating pre-trained model...")
+    try:
+        print("Creating pre-trained model...")
 
-    # Get the sample corpus
-    corpus = get_sample_corpus()
+        # Get the sample corpus
+        corpus = get_sample_corpus()
+        print(f"Sample corpus length: {len(corpus)} characters")
 
-    # Create tokenizer and fit on corpus
-    tokenizer = CharacterTokenizer()
-    tokenizer.fit([corpus])
+        # Create tokenizer and fit on corpus
+        tokenizer = CharacterTokenizer()
+        tokenizer.fit([corpus])
+        print(f"Tokenizer vocabulary size: {tokenizer.vocab_size}")
 
-    # Create model
-    model = SimpleLanguageModel(tokenizer.vocab_size)
+        # Create model
+        model = SimpleLanguageModel(tokenizer.vocab_size)
+        print("Model created")
 
-    # Create trainer
-    trainer = LanguageModelTrainer(tokenizer, model, device=device)
+        # Create trainer with shorter sequence length for demo
+        trainer = LanguageModelTrainer(
+            tokenizer,
+            model,
+            sequence_length=50,  # Shorter sequence length for the sample corpus
+            device=device,
+        )
 
-    # Train on corpus
-    trainer.train_on_text(corpus, epochs=10, batch_size=8)
+        # Train on corpus
+        print("Training pre-trained model...")
+        trainer.train_on_text(corpus, epochs=10, batch_size=8)
 
-    # Save pre-trained model
-    trainer.save_model(PRETRAINED_MODEL_PATH, PRETRAINED_TOKENIZER_PATH)
-    print("Pre-trained model created and saved!")
+        # Save pre-trained model
+        print(f"Saving pre-trained model to {PRETRAINED_MODEL_PATH}")
+        trainer.save_model(PRETRAINED_MODEL_PATH, PRETRAINED_TOKENIZER_PATH)
+        print("Pre-trained model created and saved!")
+    except Exception as e:
+        print(f"Error creating pre-trained model: {str(e)}")
+        import traceback
+
+        print(traceback.format_exc())
+        raise
+else:
+    print(f"Pre-trained model already exists at {PRETRAINED_MODEL_PATH}")
 
 
 def get_user_model_path(user_id: str) -> tuple:
@@ -168,34 +187,64 @@ async def train_model(request: TrainingRequest):
 
         # Create a new model or load existing
         if request.create_new or not os.path.exists(model_path):
-            # Create new model from pre-trained
-            tokenizer = CharacterTokenizer()
-            tokenizer.load(PRETRAINED_TOKENIZER_PATH)
+            try:
+                # Create new model from pre-trained
+                print(f"Creating new model for user {user_id}")
+                tokenizer = CharacterTokenizer()
+                tokenizer.load(PRETRAINED_TOKENIZER_PATH)
 
-            model = SimpleLanguageModel(tokenizer.vocab_size)
-            trainer = LanguageModelTrainer(tokenizer, model, device=device)
-            trainer.load_model(PRETRAINED_MODEL_PATH, PRETRAINED_TOKENIZER_PATH)
+                model = SimpleLanguageModel(tokenizer.vocab_size)
+                trainer = LanguageModelTrainer(tokenizer, model, device=device)
+                trainer.load_model(PRETRAINED_MODEL_PATH, PRETRAINED_TOKENIZER_PATH)
+            except Exception as e:
+                print(f"Error creating new model: {str(e)}")
+                import traceback
+
+                print(traceback.format_exc())
+                raise
         else:
-            # Load existing model
-            trainer = load_user_model(user_id)
+            try:
+                # Load existing model
+                print(f"Loading existing model for user {user_id}")
+                trainer = load_user_model(user_id)
+            except Exception as e:
+                print(f"Error loading existing model: {str(e)}")
+                import traceback
+
+                print(traceback.format_exc())
+                raise
 
         # Fine-tune the model
-        loss_history = trainer.train_on_text(
-            request.training_text, epochs=request.epochs, batch_size=request.batch_size
-        )
+        try:
+            print(f"Training model with text of length {len(request.training_text)}")
+            loss_history = trainer.train_on_text(
+                request.training_text,
+                epochs=request.epochs,
+                batch_size=request.batch_size,
+            )
 
-        # Save the fine-tuned model
-        trainer.save_model(model_path, tokenizer_path)
+            # Save the fine-tuned model
+            trainer.save_model(model_path, tokenizer_path)
 
-        # Update cache
-        user_models[user_id] = trainer
+            # Update cache
+            user_models[user_id] = trainer
 
-        return TrainingResponse(
-            user_id=user_id,
-            message="Model trained successfully!",
-            loss_history=loss_history,
-        )
+            return TrainingResponse(
+                user_id=user_id,
+                message="Model trained successfully!",
+                loss_history=loss_history,
+            )
+        except Exception as e:
+            print(f"Error during training: {str(e)}")
+            import traceback
+
+            print(traceback.format_exc())
+            raise
     except Exception as e:
+        print(f"Overall error in train_model: {str(e)}")
+        import traceback
+
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
