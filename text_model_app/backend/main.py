@@ -22,6 +22,18 @@ os.makedirs("models/user", exist_ok=True)
 # Initialize FastAPI app
 app = FastAPI(title="Text Generation API")
 
+# Global model manager instance
+model_manager = None
+
+
+@app.on_event("startup")
+async def startup_event():
+    global model_manager
+    if model_manager is None:
+        print("Initializing ModelManager...")
+        model_manager = ModelManager()
+
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -52,8 +64,9 @@ class GenerateRequest(BaseModel):
     user_id: Optional[str] = None
     max_length: int = 128
     temperature: float = 0.0
-    top_k: int = 50
-    top_p: float = 0.95
+    # top_k: int = 0
+    # top_p: float = 0
+
 
 class TrainRequest(BaseModel):
     user_id: str
@@ -85,14 +98,9 @@ class CorpusResponse(BaseModel):
     total_length: int
     message: str
 
-model_manager = ModelManager()
-
-# Pre-trained model paths
-PRETRAINED_MODEL_PATH = "models/pretrained/model.pt"
-PRETRAINED_TOKENIZER_PATH = "models/pretrained/tokenizer.json"
-
 # Add a semaphore to limit concurrent model usage
-model_semaphore = asyncio.Semaphore(10)  # Only 2 concurrent models in memory
+model_semaphore = asyncio.Semaphore(10)  # Only 10 concurrent models in memory
+
 
 # Create and train the pre-trained model if it doesn't exist
 @app.get("/")
@@ -139,22 +147,28 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
             
             print("Starting generation...")
             # Generate with attention mask
+            # Note: Even with 100% training accuracy, the model may not reproduce exact text
+            # because: 1) During training it uses teacher forcing (true previous tokens)
+            # while during generation it uses its own predictions as context
+            # 2) Sampling (temperature > 0) adds randomness to the generation
+            # To get exact reproduction, use temperature=0 and do_sample=False
             outputs = model.generate(
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask'],
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
                 max_new_tokens=request.max_length,
-                temperature=request.temperature,
-                top_k=request.top_k,
-                top_p=request.top_p,
-                do_sample=True if request.temperature > 0 else False,
+                temperature=request.temperature,  # Controls randomness (0 = deterministic)
+                # top_k=request.top_k,  # Limits vocabulary to top k tokens
+                # top_p=request.top_p,  # Nucleus sampling threshold
+                do_sample=request.temperature
+                > 0,  # Enable sampling only if temperature > 0
                 pad_token_id=model_manager.tokenizer.pad_token_id,
                 eos_token_id=model_manager.tokenizer.eos_token_id,
                 bos_token_id=model_manager.tokenizer.bos_token_id,
-                use_cache=False,  # Disable KV cache completely
+                use_cache=True,  # Disable KV cache completely
                 num_return_sequences=1,
-                no_repeat_ngram_size=3,
-                length_penalty=1.0,
-                repetition_penalty=1.0
+                # no_repeat_ngram_size=3,
+                # length_penalty=1.0,
+                # repetition_penalty=1.0,
             )
             
             print("Decoding output...")
@@ -1041,6 +1055,9 @@ if __name__ == "__main__":
     # Get port from environment variable or use default
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     
     uvicorn.run(
         "main:app",
@@ -1048,5 +1065,5 @@ if __name__ == "__main__":
         port=port,
         reload=False,  # Disable reload in production
         workers=1,  # Single worker for CPU training
-        log_level="info"
+        log_level="info",
     )

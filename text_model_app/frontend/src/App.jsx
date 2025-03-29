@@ -34,7 +34,7 @@ const App = () => {
   // Text generation state
   const [prompt, setPrompt] = useState('');
   const [generatedText, setGeneratedText] = useState('');
-  const [maxLength, setMaxLength] = useState(100);
+  const [maxLength, setMaxLength] = useState(40);
   const [temperature, setTemperature] = useState(0);
   
   // Training state
@@ -582,7 +582,7 @@ const App = () => {
                   onClick={handleTrainWithCorpus}
                   disabled={isTraining}
                 >
-                  {isTraining ? 'Training...' : 'Train with Corpus'}
+                  {isTraining ? 'Training...' : 'Train with entire Corpus'}
                 </button>
               )}
               
@@ -602,7 +602,7 @@ const App = () => {
                               setTimeout(() => setMessage(""), 2000);
                             }}
                           >
-                            Use as Training Text
+                            Copy only this text to training area to train on.
                           </button>
                         </div>
                         <div 
